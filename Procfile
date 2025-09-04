@@ -1,2 +1,3 @@
-web: gunicorn daddylive_secure_server:app
+web: gunicorn daddylive_iptv:app
+
 
