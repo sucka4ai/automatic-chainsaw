@@ -1,1 +1,2 @@
-web: python3 daddylive_secure_server.py
+web: gunicorn daddylive_secure_server:app
+
