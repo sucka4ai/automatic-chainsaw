@@ -3,7 +3,7 @@ import re
 import time
 import threading
 import requests
-from flask import Flask, Response, render_template_string
+from flask import Flask, Response, render_template_string, request
 
 app = Flask(__name__)
 
@@ -127,6 +127,10 @@ def refresh_channels():
             parsed = parse_m3u("GitHubFree", fb_content)
             new_channels.extend(parsed)
 
+    # Assign numeric IDs for proxying
+    for idx, ch in enumerate(new_channels):
+        ch['id'] = idx + 1
+
     channels = new_channels
     print(f"📺 Total channels loaded: {len(channels)}")
 
@@ -137,12 +141,13 @@ def auto_refresh():
         refresh_channels()
         time.sleep(REFRESH_INTERVAL)
 
+
 # ----------------------------
 # Proxy route
 # ----------------------------
 @app.route('/stream/<int:channel_id>')
 def proxy_stream(channel_id):
-    ch = next((c for c in CHANNELS if c['id']==channel_id), None)
+    ch = next((c for c in channels if c['id'] == channel_id), None)
     if not ch:
         return "Channel not found", 404
 
@@ -152,12 +157,16 @@ def proxy_stream(channel_id):
     }
 
     def generate():
-        with requests.get(ch['url'], headers=headers, stream=True) as r:
-            for chunk in r.iter_content(chunk_size=1024*16):
-                if chunk:
-                    yield chunk
+        try:
+            with requests.get(ch['url'], headers=headers, stream=True, timeout=15) as r:
+                for chunk in r.iter_content(chunk_size=1024*16):
+                    if chunk:
+                        yield chunk
+        except Exception as e:
+            print(f"❌ Error proxying {ch['url']}: {e}")
 
     return Response(generate(), content_type='application/vnd.apple.mpegurl')
+
 
 # =========================
 # FLASK ROUTES
@@ -176,7 +185,7 @@ def playlist():
     def generate():
         yield "#EXTM3U\n"
         for ch in channels:
-            yield f'#EXTINF:-1 tvg-logo="{ch["logo"]}" group-title="{ch["group"]}",{ch["name"]}\n{ch["url"]}\n'
+            yield f'#EXTINF:-1 tvg-logo="{ch["logo"]}" group-title="{ch["group"]}",{ch["name"]}\n{request.url_root}stream/{ch["id"]}\n'
     return Response(generate(), mimetype="audio/x-mpegurl")
 
 
@@ -191,13 +200,13 @@ def ui():
       <li>
         <img src="{{ ch.logo }}" width="30" style="vertical-align:middle;">
         <b>{{ ch.name }}</b> ({{ ch.group }})
-        <a href="{{ ch.url }}" target="_blank">▶ Play</a>
+        <a href="{{ request.url_root }}stream/{{ ch.id }}" target="_blank">▶ Play</a>
       </li>
     {% endfor %}
     </ul>
     </body></html>
     """
-    return render_template_string(html, channels=channels)
+    return render_template_string(html, channels=channels, request=request)
 
 
 # =========================
@@ -208,4 +217,3 @@ if __name__ == "__main__":
     refresh_channels()
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
-
